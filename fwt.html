@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Food Waste Tracker</title>
+  <style>
+    :root{--bg:#f6fbff;--card:#ffffff;--muted:#6b7280;--accent:#0ea5a4}
+    body{font-family:Inter,system-ui,Segoe UI,Roboto,"Helvetica Neue",Arial;margin:0;background:linear-gradient(180deg,#eef8fb 0%,var(--bg) 100%);color:#0f172a}
+    .container{max-width:900px;margin:36px auto;padding:20px}
+    header{display:flex;align-items:center;gap:16px}
+    h1{margin:0;font-size:1.6rem}
+    .card{background:var(--card);border-radius:12px;padding:18px;box-shadow:0 6px 18px rgba(12,38,63,0.06);margin-top:18px}
+    form{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+    label{font-size:.85rem;color:var(--muted);display:block;margin-bottom:6px}
+    input[type="text"],input[type="number"],input[type="date"],textarea,select{width:100%;padding:8px;border:1px solid #e6eef5;border-radius:8px;font-size:.95rem}
+    textarea{resize:vertical}
+    .full{grid-column:1/-1}
+    .actions{display:flex;gap:8px;align-items:center}
+    button{background:var(--accent);color:white;padding:10px 14px;border:none;border-radius:10px;cursor:pointer}
+    button.secondary{background:transparent;color:var(--accent);border:1px solid rgba(14,165,164,0.15)}
+    .donation-list{margin-top:14px}
+    .donation-item{border-radius:10px;padding:12px;border:1px solid #eef6fb;margin-bottom:10px;display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+    .meta{color:var(--muted);font-size:.86rem}
+    .pill{background:#f1fdfa;color:#036; padding:6px 8px;border-radius:999px;font-weight:600;font-size:.78rem}
+    .muted-small{font-size:.78rem;color:#94a3b8}
+    .empty{padding:30px;text-align:center;color:var(--muted)}
+    @media (max-width:640px){form{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <svg width="44" height="44" viewBox="0 0 24 24" fill="none" aria-hidden>
+        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" fill="#06b6d4"/>
+        <path d="M12 11a2 2 0 100-4 2 2 0 000 4z" fill="#ffffff"/>
+      </svg>
+      <div>
+        <h1>Food Waste Tracker</h1>
+        <div class="muted-small">Add donations, view available items, and claim them — all in your browser.</div>
+      </div>
+    </header>
+
+    <section class="card" aria-labelledby="add-section">
+      <h2 id="add-section">Add a donation</h2>
+      <form id="donation-form">
+        <div>
+          <label for="business">Business / Donor name</label>
+          <input id="business" type="text" required placeholder="e.g. Sunrise Bakery" />
+        </div>
+        <div>
+          <label for="quantity">Quantity (units)</label>
+          <input id="quantity" type="number" min="1" value="1" required />
+        </div>
+        <div>
+          <label for="food">Food item description</label>
+          <input id="food" type="text" required placeholder="e.g. 20 loaves of whole wheat bread" />
+        </div>
+        <div>
+          <label for="expiration">Expiration date</label>
+          <input id="expiration" type="date" required />
+        </div>
+
+        <div class="full">
+          <label for="notes">Notes (optional)</label>
+          <textarea id="notes" rows="2" placeholder="Any pickup details, packaging notes, etc."></textarea>
+        </div>
+
+        <div class="full actions">
+          <button type="submit">➕ Add donation</button>
+          <button type="button" id="clear-storage" class="secondary">🧹 Clear all (local)</button>
+          <div style="margin-left:auto" class="muted-small">Data saved in your browser (localStorage)</div>
+        </div>
+      </form>
+    </section>
+
+    <section class="card donation-list" aria-labelledby="available">
+      <h2 id="available">Available donations</h2>
+      <div id="list"></div>
+    </section>
+  </div>
+
+  <script>
+    // Simple in-browser implementation using localStorage. No server required.
+    const STORAGE_KEY = 'food_waste_tracker_donations_v1';
+
+    function uid() {
+      try { return crypto.randomUUID(); } catch (e) { return 'id-' + Math.random().toString(36).slice(2,10); }
+    }
+
+    function nowISO() {
+      const d = new Date();
+      return d.toISOString().slice(0,19).replace('T',' ');
+    }
+
+    function loadDonations(){
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        return raw ? JSON.parse(raw) : {};
+      } catch(e){ console.error('load error',e); return {}; }
+    }
+
+    function saveDonations(obj){
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
+    }
+
+    function addDonation(data){
+      const donations = loadDonations();
+      donations[data.id] = data;
+      saveDonations(donations);
+      renderList();
+    }
+
+    function claimDonation(id){
+      const donations = loadDonations();
+      if(!donations[id]) return alert('Donation not found');
+      if(donations[id].is_claimed) return alert('This donation is already claimed.');
+      donations[id].is_claimed = true;
+      donations[id].claimed_at = nowISO();
+      saveDonations(donations);
+      renderList();
+      alert('🎉 Donation claimed! ID: ' + id);
+    }
+
+    function clearAll(){
+      if(!confirm('Clear all saved donations from this browser? This cannot be undone.')) return;
+      localStorage.removeItem(STORAGE_KEY);
+      renderList();
+    }
+
+    function buildItemCard(id, d){
+      const wrapper = document.createElement('div');
+      wrapper.className = 'donation-item';
+
+      const left = document.createElement('div');
+      left.style.flex = '1';
+
+      const title = document.createElement('div');
+      title.innerHTML = <strong>${escapeHtml(d.food)}</strong> <span class="muted-small"> — ${escapeHtml(d.quantity)} unit(s)</span>;
+
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.innerHTML = From <strong>${escapeHtml(d.business_name)}</strong> • Added ${escapeHtml(d.created_at)} • Expires ${escapeHtml(d.expiration_date)}${d.notes ? ' • ' + escapeHtml(d.notes) : ''};
+
+      left.appendChild(title);
+      left.appendChild(meta);
+
+      const right = document.createElement('div');
+      right.style.display = 'flex';
+      right.style.flexDirection = 'column';
+      right.style.gap = '8px';
+      right.style.alignItems = 'flex-end';
+
+      if(d.is_claimed){
+        const pill = document.createElement('div');
+        pill.className = 'pill';
+        pill.textContent = 'CLAIMED';
+        right.appendChild(pill);
+        const when = document.createElement('div');
+        when.className = 'muted-small';
+        when.textContent = 'Claimed at: ' + (d.claimed_at || '-');
+        right.appendChild(when);
+      } else {
+        const btn = document.createElement('button');
+        btn.textContent = 'Claim';
+        btn.onclick = () => {
+          if(confirm('Claim this donation?')) claimDonation(id);
+        };
+        right.appendChild(btn);
+      }
+
+      wrapper.appendChild(left);
+      wrapper.appendChild(right);
+      return wrapper;
+    }
+
+    function renderList(){
+      const listEl = document.getElementById('list');
+      listEl.innerHTML = '';
+      const donations = loadDonations();
+      const entries = Object.entries(donations).sort((a,b)=> b[1].created_at.localeCompare(a[1].created_at));
+
+      const available = entries.filter(([,d])=>!d.is_claimed);
+      const all = entries;
+
+      if(all.length===0){
+        const empty = document.createElement('div');
+        empty.className = 'empty';
+        empty.textContent = 'No donations yet. Use the form above to add one.';
+        listEl.appendChild(empty);
+        return;
+      }
+
+      // Show available first
+      if(available.length){
+        const header = document.createElement('div'); header.style.marginBottom='8px'; header.innerHTML = '<strong>Available</strong>';
+        listEl.appendChild(header);
+        available.forEach(([id,d])=> listEl.appendChild(buildItemCard(id,d)));
+      }
+
+      // Show claimed separately
+      const claimed = all.filter(([,d])=>d.is_claimed);
+      if(claimed.length){
+        const header2 = document.createElement('div'); header2.style.margin='12px 0 6px'; header2.innerHTML = '<strong>Claimed</strong>';
+        listEl.appendChild(header2);
+        claimed.forEach(([id,d])=> listEl.appendChild(buildItemCard(id,d)));
+      }
+    }
+
+    function escapeHtml(unsafe){
+      return String(unsafe)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    // Form handling
+    document.getElementById('donation-form').addEventListener('submit', (e)=>{
+      e.preventDefault();
+      const business = document.getElementById('business').value.trim();
+      const food = document.getElementById('food').value.trim();
+      const quantity = parseInt(document.getElementById('quantity').value,10) || 1;
+      const expiration = document.getElementById('expiration').value;
+      const notes = document.getElementById('notes').value.trim();
+
+      if(!business || !food || !expiration){
+        alert('Please fill required fields.');
+        return;
+      }
+
+      const donation = {
+        id: uid(),
+        business_name: business,
+        food: food,
+        food_item: food,
+        quantity: quantity,
+        expiration_date: expiration,
+        notes: notes,
+        is_claimed: false,
+        created_at: nowISO()
+      };
+
+      addDonation(donation);
+      e.target.reset();
+    });
+
+    document.getElementById('clear-storage').addEventListener('click', clearAll);
+
+    // initial render
+    renderList();
+  </script>
+</body>
+</html>
